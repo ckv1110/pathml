@@ -99,7 +99,7 @@ class OpenSlideBackend(SlideBackend):
             ), f"input level {level} invalid for a slide with {self.slide.level_count} levels"
 
         # openslide read_region expects (x, y) coords, so need to switch order for compatibility with pathml (i, j)
-        i, j = location
+        j, i = location
 
         # openslide read_region() uses coords in the level 0 reference frame
         # if we are reading tiles from a higher level, need to convert to level 0 frame by multiplying by scale factor
@@ -127,7 +127,7 @@ class OpenSlideBackend(SlideBackend):
         assert (
             level < self.slide.level_count
         ), f"input level {level} invalid for slide with {self.slide.level_count} levels total"
-        j, i = self.slide.level_dimensions[level]
+        i, j = self.slide.level_dimensions[level]
         return i, j
 
     def get_thumbnail(self, size):
@@ -193,7 +193,7 @@ class OpenSlideBackend(SlideBackend):
         elif isinstance(stride, int):
             stride = (stride, stride)
 
-        i, j = self.get_image_shape(level=level)
+        j, i = self.get_image_shape(level=level)
 
         stride_i, stride_j = stride
 
@@ -571,7 +571,7 @@ class BioFormatsBackend(SlideBackend):
         elif isinstance(stride, int):
             stride = (stride, stride)
 
-        i, j = self.get_image_shape(level=level)
+        j, i = self.get_image_shape(level=level)
 
         stride_i, stride_j = stride
 
@@ -739,7 +739,7 @@ class DICOMBackend(SlideBackend):
         Returns:
             int: frame index
         """
-        i, j = coords
+        j, i = coords
         frame_i, frame_j = self.frame_shape
         # frame size must evenly divide coords, otherwise we aren't on a frame corner
         if i % frame_i or j % frame_j:

@@ -13,6 +13,7 @@ from .transforms import (
     MorphOpen,
     MorphClose,
     NucleusDetectionHE,
+    NucleusDetectionHEWs,
     StainNormalizationHE,
     SuperpixelInterpolation,
     TissueDetectionHE,
@@ -25,4 +26,5 @@ from .transforms import (
     RescaleIntensity,
     HistogramEqualization,
     AdaptiveHistogramEqualization,
+    NucleusDetectionHEWsTest
 )

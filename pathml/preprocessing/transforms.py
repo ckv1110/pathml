@@ -23,6 +23,13 @@ from pathml.utils import (
 from skimage import restoration
 from skimage.exposure import equalize_adapthist, equalize_hist, rescale_intensity
 from skimage.measure import regionprops_table
+from skimage.feature import peak_local_max
+# from skimage.morphology import watershed
+from skimage.segmentation import watershed
+from scipy import ndimage
+import argparse
+import imutils
+import matplotlib.pyplot as plt
 
 # Base class
 class Transform:
@@ -996,6 +1003,192 @@ class NucleusDetectionHE(Transform):
         nucleus_mask = self.F(tile.image)
         tile.masks[self.mask_name] = nucleus_mask
 
+class NucleusDetectionHEWs(Transform):
+    # Nucleus detection using the method above + watershedding segmentaiton to split contours
+    def __init__(
+        self,
+        mask_name=None,
+        stain_estimation_method="vahadane",
+        optical_density_threshold=0.05,
+        superpixel_region_size=10,
+        n_iter=30,
+        min_distance=20,
+        number=None,
+        **stain_kwargs
+    ):
+        self.stain_estimation_method = stain_estimation_method
+        self.optical_density_threshold = optical_density_threshold
+        self.superpixel_region_size = superpixel_region_size
+        self.n_iter = n_iter
+        self.min_distance = min_distance
+        self.stain_kwargs = stain_kwargs
+        self.mask_name = mask_name
+        self.number = number
+
+    def __repr__(self):
+        return (
+            f"NucleusDetectionHE(mask_name={self.mask_name}, "
+            f"stain_estimation_method={self.stain_estimation_method}, "
+            f"optical_density_threshold={self.optical_density_threshold}, "
+            f"min_distance={self.min_distance}, "
+            f"number={self.number}, "
+            f"superpixel_region_size={self.superpixel_region_size}, n_iter={self.n_iter}, "
+            f"stain_kwargs={self.stain_kwargs})"
+        )
+
+    def F(self, image):
+        assert (
+            image.dtype == np.uint8
+        ), f"Input image dtype {image.dtype} must be np.uint8"
+        im_hematoxylin = StainNormalizationHE(
+            target="hematoxylin",
+            stain_estimation_method=self.stain_estimation_method,
+            optical_density_threshold=self.optical_density_threshold,
+            **self.stain_kwargs,
+        ).F(image)
+        im_interpolated = SuperpixelInterpolation(
+            region_size=self.superpixel_region_size, n_iter=self.n_iter
+        ).F(im_hematoxylin)
+        im_interp_grey = RGB_to_GREY(im_interpolated)
+        thresholded = BinaryThreshold(use_otsu=True).F(im_interp_grey)
+        # flip sign so that nuclei regions are TRUE (255)
+        thresholded = ~thresholded
+
+        # Calculate the Euclidean distance from every binary pixel to the nearest zero pixel, then finds peaks in this distance map
+        D = ndimage.distance_transform_edt(thresholded)
+
+        # Generate markers as local maxima of distance to the background (test n.1)
+        localMax = peak_local_max(D, indices=False, min_distance=self.min_distance,labels=thresholded)
+        markers = ndimage.label(localMax, structure=np.ones((3,3)))[0]
+        labels = watershed(-D, markers, mask=thresholded)
+
+        blank = image.copy()
+        for label in np.unique(labels):
+            # if the label is zero, we are examining the 'background'
+            # so simply ignore it
+            if label == 0:
+                continue
+            # otherwise, allocate memory for the label region and draw
+            # it on the mask
+            mask = np.zeros(im_interp_grey.shape, dtype="uint8")
+            mask[labels == label] = 255
+            # detect contours in the mask and grab the largest one
+            contours, hierarchy = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+            cv2.drawContours(blank,contours,-1, (0,255,0),2)
+            # cv2.putText(image, "#{}".format(label), (int(x) - 10, int(y)),cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        # show the output image
+        # cv2.imshow('mask', blank)
+        # cv2.waitKey(0)
+        self.number = len(np.unique(labels)) - 1
+        # print("[INFO] {} unique segments found".format(self.number))
+        return labels
+
+    def apply(self, tile):
+        assert isinstance(
+            tile, pathml.core.tile.Tile
+        ), f"tile is type {type(tile)} but must be pathml.core.tile.Tile"
+        assert (
+            self.mask_name is not None
+        ), "mask_name is None. Must supply a valid mask name"
+        assert (
+            tile.slide_type.stain == "HE"
+        ), f"Tile has slide_type.stain={tile.slide_type.stain}, but must be 'HE'"
+        nucleus_mask = self.F(tile.image)
+        tile.masks[self.mask_name] = nucleus_mask
+
+class NucleusDetectionHEWsTest(Transform):
+    # Nucleus detection using the method above + watershedding segmentaiton to split contours
+    def __init__(
+        self,
+        mask_name=None,
+        stain_estimation_method="vahadane",
+        optical_density_threshold=0.05,
+        superpixel_region_size=10,
+        n_iter=30,
+        min_distance=20,
+        number=None,
+        **stain_kwargs
+    ):
+        self.stain_estimation_method = stain_estimation_method
+        self.optical_density_threshold = optical_density_threshold
+        self.superpixel_region_size = superpixel_region_size
+        self.n_iter = n_iter
+        self.min_distance = min_distance
+        self.stain_kwargs = stain_kwargs
+        self.mask_name = mask_name
+        self.number = number
+
+    def __repr__(self):
+        return (
+            f"NucleusDetectionHE(mask_name={self.mask_name}, "
+            f"stain_estimation_method={self.stain_estimation_method}, "
+            f"optical_density_threshold={self.optical_density_threshold}, "
+            f"min_distance={self.min_distance}, "
+            f"number={self.number}, "
+            f"superpixel_region_size={self.superpixel_region_size}, n_iter={self.n_iter}, "
+            f"stain_kwargs={self.stain_kwargs})"
+    )
+
+    def F(self, image):
+        assert (
+            image.dtype == np.uint8
+        ), f"Input image dtype {image.dtype} must be np.uint8"
+        im_hematoxylin = StainNormalizationHE(
+            target="hematoxylin",
+            stain_estimation_method=self.stain_estimation_method,
+            optical_density_threshold=self.optical_density_threshold,
+            **self.stain_kwargs,
+        ).F(image)
+        im_interpolated = SuperpixelInterpolation(
+            region_size=self.superpixel_region_size, n_iter=self.n_iter
+        ).F(im_hematoxylin)
+        im_interp_grey = RGB_to_GREY(im_interpolated)
+        thresholded = BinaryThreshold(use_otsu=True).F(im_interp_grey)
+        # flip sign so that nuclei regions are TRUE (255)
+        thresholded = ~thresholded
+
+        # Calculate the Euclidean distance from every binary pixel to the nearest zero pixel, then finds peaks in this distance map
+        D = ndimage.distance_transform_edt(thresholded)
+
+        # Generate markers as local maxima of distance to the background (test n.1)
+        localMax = peak_local_max(D, indices=False, min_distance=self.min_distance,labels=thresholded)
+        markers = ndimage.label(localMax, structure=np.ones((3,3)))[0]
+        labels = watershed(-D, markers, mask=thresholded)
+
+        blank = image.copy()
+        for label in np.unique(labels):
+            # if the label is zero, we are examining the 'background'
+            # so simply ignore it
+            if label == 0:
+                continue
+            # otherwise, allocate memory for the label region and draw
+            # it on the mask
+            mask = np.zeros(im_interp_grey.shape, dtype="uint8")
+            mask[labels == label] = 255
+            # detect contours in the mask and grab the largest one
+            contours, hierarchy = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+            cv2.drawContours(blank,contours,-1, (0,255,0),2)
+            # cv2.putText(image, "#{}".format(label), (int(x) - 10, int(y)),cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        # show the output image
+        # cv2.imshow('mask', blank)
+        # cv2.waitKey(0)
+        self.number = len(np.unique(labels)) - 1
+        # print("[INFO] {} unique segments found".format(self.number))
+        return blank
+
+    def apply(self, tile):
+        assert isinstance(
+            tile, pathml.core.tile.Tile
+        ), f"tile is type {type(tile)} but must be pathml.core.tile.Tile"
+        assert (
+            self.mask_name is not None
+        ), "mask_name is None. Must supply a valid mask name"
+        assert (
+            tile.slide_type.stain == "HE"
+        ), f"Tile has slide_type.stain={tile.slide_type.stain}, but must be 'HE'"
+        nucleus_mask = self.F(tile.image)
+        tile.masks[self.mask_name] = nucleus_mask
+
 
 class TissueDetectionHE(Transform):
     """
@@ -1090,6 +1283,7 @@ class TissueDetectionHE(Transform):
         ), f"Tile has slide_type.stain={tile.slide_type.stain}, but must be 'HE'"
         mask = self.F(tile.image)
         tile.masks[self.mask_name] = mask
+
 
 
 class LabelWhiteSpaceHE(Transform):
