@@ -49,7 +49,7 @@ RUN conda install -y -c anaconda cudatoolkit=11.0 && \
 	pip3 install git+https://github.com/qubvel/segmentation_models.pytorch && \
 	pip3 install -U albumentations && \
 	pip3 install fastnumbers && \
-	pip3 install bokeh && \
+	pip3 install bokeh==2.4.3 && \
 	pip3 install pytorch-lightning
 	
 
